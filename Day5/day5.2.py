@@ -35,6 +35,7 @@ def add_mapping_to_dictionary(dictionary, number_string):
     destination_range_target = numbers[0]
     source_range_target = numbers[1]
     range_value = numbers[2]
+    
     dictionary[(source_range_target, source_range_target + range_value - 1)] = (destination_range_target, destination_range_target + range_value - 1)
 
 def get_value_from_mapping(dictionary, key):
@@ -52,7 +53,10 @@ def get_source_for_value(dictionary, value):
 
 def get_min_location_seed_range(seed_range):
     locations = []
+    i = 0
     for seed in range(seed_range[0], seed_range[1]):
+        if i % 1000000 == 0 and i > 0:
+            print(f"1 million done for range {seed_range}")
         soil = get_value_from_mapping(seed_to_soil, seed)
         fertilizer = get_value_from_mapping(soil_to_fertilizer, soil)
         water = get_value_from_mapping(fertilizer_to_water, fertilizer)
@@ -61,28 +65,71 @@ def get_min_location_seed_range(seed_range):
         humidity = get_value_from_mapping(temperature_to_humidity, temperature)
         location = get_value_from_mapping(humidity_to_location, humidity)
         locations.append(location)
+        i += 1
     return min(locations)
 
-def get_min_dest_range_in_value_ranges_dictionary(dictionary):
-    min_value = min([dictionary[source_range][0] for source_range in dictionary.keys()])
-    return (0, [dictionary[source_range] for source_range in dictionary.keys() if dictionary[source_range][0] == min_value][0][1])
+def range_fully_contained(range_a, range_b):
+    return range_b[0] <= range_a[0] <= range_b[1] and range_b [0] <= range_a[1] <= range_b[1]
 
-def get_source_range_containing_range(dictionary, range):
-    min_value_range = range[0]
-    max_value_range = range[1]
-    min_value_return_val = None
-    max_value_return_val = None
-    for source_range in dictionary.keys():
-        min_value_source_range = dictionary[source_range][0]
-        max_value_source_range = dictionary[source_range][1]
-        if min_value_source_range <= min_value_range <= max_value_source_range:
-            min_value_return_val = source_range[0] + (min_value_range - min_value_source_range)
-        if max_value_range <= max_value_source_range:
-            max_value_return_val = source_range[1] + (max_value_source_range - max_value_range)
-        if max_value_return_val != None and min_value_return_val != None:
-            break
-    return (min_value_return_val, max_value_return_val) if min_value_return_val != None and max_value_return_val != None else range
+def range_fully_uncontained_left(range_a, range_b):
+    return range_a[1] < range_b[0]
 
+def range_fully_uncontained_right(range_a, range_b):
+    return range_a[0] > range_b[1]
+
+def range_fully_uncontained(range_a, range_b):
+    return range_fully_uncontained_left(range_a, range_b) or range_fully_uncontained_right(range_a, range_b)
+
+def range_partly_contained_left(range_a, range_b):
+    return (range_b[0] <= range_a[1] <= range_b[1] and range_a[0] < range_b[1])
+
+def range_partly_contained_right(range_a, range_b):
+    return (range_b[0] <= range_a[0] <= range_b[1] and range_a[1] > range_b[1])
+
+def range_partly_contained(range_a, range_b):
+    return range_partly_contained_left(range_a, range_b) or range_partly_contained_right(range_a, range_b)
+
+def extract_intersection_interval(range_a, range_b):
+    if range_partly_contained_left(range_a, range_b):
+        return (range_b[0], range_a[1])
+    if range_partly_contained_right(range_a, range_b):
+        return (range_a[0], range_b[1])
+
+def extract_difference_interval(range_a, range_b):
+    if range_b[0] == range_b[1] and (range_a[0] == range_b[0]):
+        return (range_a[0] + 1, range_a[1])
+    if range_b[0] == range_b[1] and (range_a[1] == range_b[0]):
+        return (range_a[0], range_a[1] - 1)
+    if range_partly_contained_left(range_a, range_b):
+        return (range_a[0], range_b[0] - 1)
+    if range_partly_contained_right(range_a, range_b):
+        return (range_b[1] + 1, range_a[1])
+
+def get_source_ranges_containing_range(dictionary, range, i):
+    if i < len(dictionary):
+        value_ranges_sorted = sorted(dictionary.values())
+        small_range = value_ranges_sorted[i]
+        if range_fully_contained(range, small_range):
+            return [(get_source_for_value(dictionary, range[0]), get_source_for_value(dictionary, range[1]))]
+    
+        if range_fully_uncontained(range, small_range):
+            i += 1
+            return get_source_ranges_containing_range(dictionary, range, i)
+        
+        if range_partly_contained(range, small_range):
+            intersection_range = extract_intersection_interval(range, small_range)
+            difference_range = extract_difference_interval(range, small_range)
+            ret_val = [(get_source_for_value(dictionary, intersection_range[0]), get_source_for_value(dictionary, intersection_range[1]))]
+            i += 1
+            ret_val.extend(get_source_ranges_containing_range(dictionary, difference_range, i))
+            return ret_val
+    return [range]    
+
+def extract_potential_min_ranges(dictionary, ranges):
+    ret_val = []
+    for min_range in ranges:
+        ret_val.extend(get_source_ranges_containing_range(dictionary, min_range, 0))
+    return ret_val
 
 with open("/home/leo/repos/AdventOfCode2023/Day5/input.txt", mode="r") as file:
     lines = file.readlines()
@@ -130,46 +177,73 @@ with open("/home/leo/repos/AdventOfCode2023/Day5/input.txt", mode="r") as file:
                 add_mapping_to_dictionary(humidity_to_location, clean_line)
 
 
-    # max_location_value_within_ranges = get_max_dest_value_from_range_dictionary(humidity_to_location)
+    print(f"Seed to soil: {seed_to_soil}")
+    print(f"Soil to fertilizer: {soil_to_fertilizer}")
+    print(f"Fertilizer to water: {fertilizer_to_water}")
+    print(f"Water to light: {water_to_light}")
+    print(f"light to temperature: {light_to_temperature}")
+    print(f"Temperatur to humidity: {temperature_to_humidity}")
+    print(f"Humidity to location: {humidity_to_location}")
     print("Computing min range...")
 
-    min_location_range = sorted(humidity_to_location)[0]
-    min_huminity_range = get_source_range_containing_range(humidity_to_location, min_location_range)
-    min_temperature_range = get_source_range_containing_range(temperature_to_humidity, min_huminity_range)
-    min_light_range = get_source_range_containing_range(light_to_temperature, min_temperature_range)
-    min_water_range = get_source_range_containing_range(water_to_light, min_light_range)
-    min_fertilizer_range = get_source_range_containing_range(fertilizer_to_water, min_water_range)
-    min_soil_range = get_source_range_containing_range(soil_to_fertilizer, min_fertilizer_range)
-    min_seed_range = get_source_range_containing_range(seed_to_soil, min_soil_range)
-    
-    print(f"Found min seed range: {min_seed_range}")
+    sorted_humidity_to_location = sorted(humidity_to_location)
 
+    location_index = 0
+    step_size = 1000000
+    step_start = 0
+    max_step_end = sorted_humidity_to_location[location_index][0]
+    step_end = step_size
+    min_location_range = (step_start, step_end)
+    while step_end <= max_step_end:
+        min_huminity_ranges = get_source_ranges_containing_range(humidity_to_location, min_location_range, 0)
+        min_temperature_ranges = extract_potential_min_ranges(temperature_to_humidity, min_huminity_ranges)
+        min_light_ranges = extract_potential_min_ranges(light_to_temperature, min_temperature_ranges)
+        min_water_ranges = extract_potential_min_ranges(water_to_light, min_light_ranges)
+        min_fertilizer_ranges = extract_potential_min_ranges(fertilizer_to_water, min_water_ranges)
+        min_soil_ranges = extract_potential_min_ranges(soil_to_fertilizer, min_fertilizer_ranges)
+        min_seed_ranges = extract_potential_min_ranges(seed_to_soil, min_soil_ranges)
 
-    seed_ranges_sorted = sorted(seed_ranges)
-    min_seed_to_check = min_seed_range[0]
-    max_seed_to_check = min_seed_range[1]
-    seed_ranges_to_check = []
-    max_seed_in_range = 0
-    min_range_defined = False
-    for seed_range in seed_ranges_sorted:
-        if seed_range[0] <= min_seed_to_check <= seed_range[1] and max_seed_to_check > seed_range[1]:
-            seed_ranges_to_check.append((min_seed_to_check, seed_range[1]))
-            min_range_defined = True
-        elif seed_range[0] >= min_seed_to_check and max_seed_to_check > seed_range[1]:
-            seed_ranges_to_check.append(seed_range)
-            min_range_defined = True
-        elif seed_range[1] < max_seed_to_check and min_range_defined:
-            seed_ranges_to_check.append(seed_range)
-        elif max_seed_to_check <= seed_range[1] and min_range_defined:
-            seed_ranges_to_check.append((seed_range[0], max_seed_to_check))
+        seed_ranges_sorted = sorted(seed_ranges)
+        min_seed_ranges_sorted = sorted(min_seed_ranges)
+        to_compute = []
     
-    print(f"Found {len(seed_ranges_to_check)} seed range to check")
-    print(f"Sorted seed ranges: {seed_ranges_sorted}")
-    print(f"Found seed ranges: {seed_ranges_to_check}")
-    print(f"Total seeds to check: {sum([seed_range[1] - seed_range[0] for seed_range in seed_ranges_to_check])}")
-    print(f"Max seed in seed ranges: {seed_ranges_sorted[len(seed_ranges_sorted)-1][1]}" )
-    pool = ThreadPool(processes=8)
-    min_locations = pool.map(get_min_location_seed_range, seed_ranges_to_check)
-    print(f"Minimal location: {min(min_locations)}")
+        for seed_range in seed_ranges_sorted:
+            to_remove = []
+            for min_seed_range in min_seed_ranges_sorted:
+                if range_fully_uncontained_left(min_seed_range, seed_range):
+                    to_remove.append(min_seed_range)
+                elif range_fully_contained(min_seed_range, seed_range):
+                    to_compute.append(min_seed_range)
+                elif range_partly_contained(min_seed_range, seed_range):
+                    to_compute.append(extract_intersection_interval(min_seed_range, seed_range))
+            for min_seed_range in to_remove:
+                min_seed_ranges_sorted.remove(min_seed_range)
+    
+        seed_ranges_to_check = to_compute
+
+        if len(to_compute) > 0:        
+            print(f"Found {len(seed_ranges_to_check)} seed range to check")
+            print(f"Sorted seed ranges: {seed_ranges_sorted}")
+            print(f"Found seed ranges: {seed_ranges_to_check}")
+            print(f"Total seeds to check: {sum([seed_range[1] - seed_range[0] for seed_range in seed_ranges_to_check])}")
+            print(f"Max seed in seed ranges: {seed_ranges_sorted[len(seed_ranges_sorted)-1][1]}" )
+            pool = ThreadPool(processes=8)
+            min_locations = pool.map(get_min_location_seed_range, seed_ranges_to_check)
+            print(f"Minimal location: {min(min_locations)}")
+            break
+
+        if step_end > max_step_end:
+            step_end = max_step_end
+            step_start += step_size
+        elif step_start + step_size > max_step_end:
+            location_index += 1
+            step_start = sorted_humidity_to_location[location_index][0]
+            max_step_end = sorted_humidity_to_location[location_index][1]
+            step_end = step_start + step_size
+        else:
+            step_start += step_size
+            step_end += step_size
+        min_location_range = (step_start, step_end)
 
     
+        
